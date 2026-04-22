@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Companion Fleet Manager</title>
+    
+    <!-- React & Tailwind CDNs -->
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <style>
+        body { background-color: #111827; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        function App() {
+            // AUTHENTICATION STATE
+            const [authState, setAuthState] = React.useState('passcode'); // 'passcode', 'colors', 'authenticated'
+            const [passcode, setPasscode] = React.useState('');
+            const [colorSelection, setColorSelection] = React.useState([]);
+
+            // SYSTEMS STATE
+            const [systems, setSystems] = React.useState(() => {
+                const saved = localStorage.getItem('companionSystems');
+                if (saved) return JSON.parse(saved);
+                return [
+                    { id: 1, name: "Main Studio (Local)", ip: "192.168.1.100", port: "8000", network: "Local LAN", status: "checking", videoLink: "https://vdo.ninja/?view=main_studio_cam1" }
+                ];
+            });
+
+            const [activeVideo, setActiveVideo] = React.useState(null);
+            const [editingSystem, setEditingSystem] = React.useState(null);
+
+            // SAVE TO LOCAL STORAGE ON CHANGE
+            React.useEffect(() => {
+                if (authState === 'authenticated') localStorage.setItem('companionSystems', JSON.stringify(systems));
+            }, [systems, authState]);
+
+            // AUTHENTICATION LOGIC
+            const handlePasscodeSubmit = (e) => {
+                e.preventDefault();
+                if (passcode === '1615') setAuthState('colors');
+                else { alert('Incorrect Passcode'); setPasscode(''); }
+            };
+
+            const handleColorClick = (color) => {
+                const newSelection = [...colorSelection, color];
+                setColorSelection(newSelection);
+                
+                if (newSelection.length === 3) {
+                    if (newSelection[0] === 'red' && newSelection[1] === 'green' && newSelection[2] === 'blue') {
+                        setAuthState('authenticated');
+                    } else {
+                        alert('Security Breach. Access Denied.');
+                        setColorSelection([]);
+                        setAuthState('passcode');
+                        setPasscode('');
+                    }
+                }
+            };
+
+            const checkStatus = () => {
+                setSystems(prev => prev.map(s => ({ ...s, status: 'checking' })));
+                setTimeout(() => {
+                    setSystems(prev => prev.map(s => {
+                        const isOfflineDemo = s.ip.includes("10.9.0"); 
+                        return { ...s, status: isOfflineDemo ? 'offline' : 'online' };
+                    }));
+                }, 1000);
+            };
+
+            React.useEffect(() => { if (authState === 'authenticated') checkStatus(); }, [authState]);
+
+            // CRUD OPERATIONS
+            const handleAddSystem = () => {
+                const newSys = { id: Date.now(), name: "New System", ip: "127.0.0.1", port: "8000", network: "VPN", status: "checking", videoLink: "" };
+                setSystems([...systems, newSys]);
+                setEditingSystem(newSys);
+            };
+
+            const handleSaveSystem = () => {
+                setSystems(prev => prev.map(s => s.id === editingSystem.id ? editingSystem : s));
+                setEditingSystem(null);
+                checkStatus(); 
+            };
+
+            const handleDeleteSystem = (id) => {
+                if (confirm("Are you sure you want to remove this system?")) {
+                    setSystems(prev => prev.filter(s => s.id !== id));
+                    setEditingSystem(null);
+                }
+            };
+
+            // RENDER: SECURITY STEP 1
+            if (authState === 'passcode') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white">
+                        <form onSubmit={handlePasscodeSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border border-gray-700">
+                            <i className="fas fa-lock text-4xl text-indigo-500 mb-4"></i>
+                            <h2 className="text-2xl font-bold mb-6">Enter Passcode</h2>
+                            <input type="password" value={passcode} onChange={e => setPasscode(e.target.value)} className="w-full text-center bg-gray-900 border border-gray-600 rounded p-3 text-white tracking-widest text-xl mb-4" placeholder="****" autoFocus />
+                            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded font-bold transition">Unlock</button>
+                        </form>
+                    </div>
+                );
+            }
+
+            // RENDER: SECURITY STEP 2
+            if (authState === 'colors') {
+                const colors = [
+                    { id: 'yellow', hex: '#EAB308' }, { id: 'red', hex: '#EF4444' }, { id: 'purple', hex: '#A855F7' },
+                    { id: 'green', hex: '#22C55E' }, { id: 'blue', hex: '#3B82F6' }, { id: 'orange', hex: '#F97316' }
+                ];
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white">
+                        <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border border-gray-700 max-w-sm">
+                            <i className="fas fa-fingerprint text-4xl text-indigo-500 mb-4"></i>
+                            <h2 className="text-2xl font-bold mb-2">Color Verification</h2>
+                            <p className="text-gray-400 text-sm mb-6">Select the required 3 color sequence.</p>
+                            
+                            <div className="grid grid-cols-3 gap-4 mb-6">
+                                {colors.map(color => (
+                                    <button 
+                                        key={color.id} 
+                                        onClick={() => handleColorClick(color.id)} 
+                                        style={{ backgroundColor: color.hex }}
+                                        className="h-16 w-full rounded shadow hover:opacity-80 transition"
+                                    ></button>
+                                ))}
+                            </div>
+                            <div className="flex gap-2 justify-center mb-2">
+                                {[0, 1, 2].map(i => (
+                                    <div key={i} className={`h-4 w-12 rounded ${colorSelection.length > i ? 'bg-indigo-500' : 'bg-gray-700'}`}></div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // RENDER: SECURE DASHBOARD
+            return (
+                <div className="min-h-screen text-white p-8 font-sans">
+                    <div className="max-w-7xl mx-auto relative">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 border-b border-gray-700 pb-4 gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold flex items-center gap-3">
+                                    <i className="fas fa-broadcast-tower text-indigo-500"></i> Fleet Manager
+                                </h1>
+                            </div>
+                            <div className="flex gap-3">
+                                <button onClick={handleAddSystem} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded shadow flex items-center gap-2 transition font-semibold">
+                                    <i className="fas fa-plus"></i> Add Unit
+                                </button>
+                                <button onClick={checkStatus} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded shadow flex items-center gap-2 transition font-semibold">
+                                    <i className="fas fa-sync-alt"></i> Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {systems.map((sys) => (
+                                <div key={sys.id} className="bg-gray-800 rounded-xl p-5 border-t-4 shadow-lg flex flex-col h-full" style={{ borderColor: sys.status === 'online' ? '#10B981' : sys.status === 'offline' ? '#EF4444' : '#F59E0B' }}>
+                                    
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex-1 min-w-0 pr-3">
+                                            <h2 className="text-xl font-bold truncate">{sys.name}</h2>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => setEditingSystem({...sys})} className="text-gray-400 hover:text-white transition">
+                                                <i className="fas fa-cog"></i>
+                                            </button>
+                                            <div className="flex items-center gap-2 text-sm font-medium bg-gray-900 px-2.5 py-1 rounded-full border border-gray-700">
+                                                {sys.status === 'checking' && <span className="text-yellow-500"><i className="fas fa-spinner fa-spin"></i> Ping</span>}
+                                                {sys.status === 'online' && <span className="text-green-500"><i className="fas fa-circle text-[10px]"></i> Live</span>}
+                                                {sys.status === 'offline' && <span className="text-red-500"><i className="fas fa-times-circle"></i> Down</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4 mb-6 flex-grow text-gray-300 text-sm">
+                                        <div className="flex bg-gray-900/50 rounded-lg p-3 gap-4 border border-gray-700/50">
+                                            <div className="flex-1">
+                                                <div className="text-xs text-gray-500 uppercase font-semibold mb-1"><i className="fas fa-network-wired text-gray-400"></i> Routing</div>
+                                                <div className="font-medium text-blue-300 truncate">{sys.network}</div>
+                                            </div>
+                                            <div className="border-l border-gray-700/50 pl-4 flex-1">
+                                                <div className="text-xs text-gray-500 uppercase font-semibold mb-1"><i className="fas fa-server text-gray-400"></i> Endpoint</div>
+                                                <div className="font-mono text-[13px]">{sys.ip}:{sys.port}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mt-auto mb-2">
+                                        <a href={`http://${sys.ip}:${sys.port}`} target="_blank" className={`flex items-center justify-center gap-2 py-2 px-3 rounded text-sm font-semibold transition ${sys.status === 'offline' ? 'bg-gray-700/50 text-gray-500 pointer-events-none' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>
+                                            <i className="fas fa-sliders-h"></i> Web GUI
+                                        </a>
+                                        <a href={`http://${sys.ip}:${sys.port}/emulator`} target="_blank" className={`flex items-center justify-center gap-2 py-2 px-3 rounded text-sm font-semibold transition ${sys.status === 'offline' ? 'bg-gray-700/50 text-gray-500 pointer-events-none' : 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-600/30'}`}>
+                                            <i className="fas fa-mobile-alt"></i> Emulator
+                                        </a>
+                                    </div>
+                                    <button onClick={() => setActiveVideo(sys)} className="w-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center gap-2 py-2.5 px-3 rounded text-sm font-bold transition shadow">
+                                        <i className="fas fa-video"></i> Monitor
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Edit Modal (Now with Delete) */}
+                    {editingSystem && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+                            <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md border border-gray-600 p-5">
+                                <h3 className="font-bold text-lg text-white mb-4">Edit System Details</h3>
+                                <div className="space-y-4">
+                                    <div><label className="block text-xs text-gray-400 font-bold mb-1">Name</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white" value={editingSystem.name} onChange={e => setEditingSystem({...editingSystem, name: e.target.value})} /></div>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1"><label className="block text-xs text-gray-400 font-bold mb-1">IP</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white font-mono" value={editingSystem.ip} onChange={e => setEditingSystem({...editingSystem, ip: e.target.value})} /></div>
+                                        <div className="w-24"><label className="block text-xs text-gray-400 font-bold mb-1">Port</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white font-mono" value={editingSystem.port} onChange={e => setEditingSystem({...editingSystem, port: e.target.value})} /></div>
+                                    </div>
+                                    <div><label className="block text-xs text-gray-400 font-bold mb-1">Video Feed URL</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white font-mono" value={editingSystem.videoLink} onChange={e => setEditingSystem({...editingSystem, videoLink: e.target.value})} /></div>
+                                </div>
+                                <div className="mt-6 flex justify-between">
+                                    <button onClick={() => handleDeleteSystem(editingSystem.id)} className="text-red-500 hover:text-red-400">Delete System</button>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => setEditingSystem(null)} className="text-gray-400 hover:text-white">Cancel</button>
+                                        <button onClick={handleSaveSystem} className="px-5 py-2 bg-indigo-600 text-white rounded">Save</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Video Modal Placeholder */}
+                    {activeVideo && (
+                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-50">
+                            <div className="w-full h-full relative">
+                                <button onClick={() => setActiveVideo(null)} className="absolute top-4 right-4 bg-gray-800 text-white rounded-full h-10 w-10 z-50 flex items-center justify-center hover:bg-red-600"><i className="fas fa-times"></i></button>
+                                <iframe src={activeVideo.videoLink} className="w-full h-full border-0" allow="autoplay; camera; microphone; fullscreen"></iframe>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -36,11 +36,20 @@
             const [activeVideo, setActiveVideo] = React.useState(null);
             const [editingSystem, setEditingSystem] = React.useState(null);
 
+            // We need a ref to hold the current systems so the 30-second timer always knows what to check
+            const systemsRef = React.useRef(systems);
+            React.useEffect(() => {
+                systemsRef.current = systems;
+            }, [systems]);
+
             // ==========================================
             // TRUE APP STATUS CHECKER (IMAGE PING)
             // ==========================================
-            const checkAllStatuses = async (systemList) => {
-                setSystems(systemList.map(s => ({...s, status: 'checking'})));
+            // Added isBackground flag so the auto-checker doesn't flash yellow every 30 seconds
+            const checkAllStatuses = async (systemList, isBackground = false) => {
+                if (!isBackground) {
+                    setSystems(systemList.map(s => ({...s, status: 'checking'})));
+                }
 
                 const checkedSystems = await Promise.all(systemList.map(sys => {
                     return new Promise((resolve) => {
@@ -65,6 +74,23 @@
             };
 
             // ==========================================
+            // AUTO-MONITORING (EVERY 30 SECONDS)
+            // ==========================================
+            React.useEffect(() => {
+                let intervalId;
+                if (authState === 'authenticated') {
+                    // Set up a loop to ping systems every 30,000 milliseconds (30 sec)
+                    intervalId = setInterval(() => {
+                        if (systemsRef.current.length > 0) {
+                            checkAllStatuses(systemsRef.current, true);
+                        }
+                    }, 30000); 
+                }
+                return () => clearInterval(intervalId); // Clean up timer if user logs out or closes
+            }, [authState]);
+
+
+            // ==========================================
             // CLOUD DATABASE FUNCTIONS (JSONBIN)
             // ==========================================
             const fetchFromCloud = async () => {
@@ -85,7 +111,7 @@
                         parsedSystems = data.record;
                     }
                     
-                    await checkAllStatuses(parsedSystems);
+                    await checkAllStatuses(parsedSystems, false);
                     
                 } catch (error) {
                     console.error(error);
@@ -95,7 +121,7 @@
             };
 
             const saveToCloud = async (newSystems) => {
-                checkAllStatuses(newSystems);
+                checkAllStatuses(newSystems, false);
                 const payloadToSave = { systems: newSystems };
                 
                 try {
@@ -112,14 +138,6 @@
                     alert(`Save Error: ${error.message}`);
                 }
             };
-
-            React.useEffect(() => {
-                const handleEsc = (e) => {
-                    if (e.key === 'Escape') { setActiveVideo(null); setEditingSystem(null); }
-                };
-                window.addEventListener('keydown', handleEsc);
-                return () => window.removeEventListener('keydown', handleEsc);
-            }, []);
 
             // ==========================================
             // OBFUSCATED SECURITY LOGIC
@@ -141,11 +159,9 @@
                 if (newSelection.length === 3) {
                     const stringifiedSequence = newSelection.join(',');
                     if (btoa(stringifiedSequence) === 'cmVkLGdyZWVuLGJsdWU=') {
-                        // Success! Now check if we are on the public internet (HTTPS)
                         if (window.location.protocol === 'https:') {
-                            setAuthState('browser-setup'); // Show the manual instruction screen
+                            setAuthState('browser-setup'); 
                         } else {
-                            // If local file, skip instructions and go right in
                             setAuthState('authenticated');
                             fetchFromCloud();
                         }
@@ -217,7 +233,6 @@
                 );
             }
 
-            // NEW BROWSER SETUP SCREEN
             if (authState === 'browser-setup') {
                 return (
                     <div className="min-h-screen flex items-center justify-center text-white p-4">

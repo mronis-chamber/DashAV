@@ -36,14 +36,31 @@
             const [activeVideo, setActiveVideo] = React.useState(null);
             const [editingSystem, setEditingSystem] = React.useState(null);
 
+            // Detect if we are running securely (GitHub Pages restriction)
+            const isHttpsEnv = window.location.protocol === 'https:';
+
+            const systemsRef = React.useRef(systems);
+            React.useEffect(() => {
+                systemsRef.current = systems;
+            }, [systems]);
+
             // ==========================================
             // TRUE APP STATUS CHECKER (IMAGE PING)
             // ==========================================
-            const checkAllStatuses = async (systemList) => {
-                setSystems(systemList.map(s => ({...s, status: 'checking'})));
+            const checkAllStatuses = async (systemList, isBackground = false) => {
+                if (!isBackground) {
+                    setSystems(systemList.map(s => ({...s, status: 'checking'})));
+                }
 
                 const checkedSystems = await Promise.all(systemList.map(sys => {
                     return new Promise((resolve) => {
+                        // If on GitHub Pages (HTTPS) and target is HTTP, it WILL be blocked.
+                        // Skip the ping entirely to prevent console errors and set to purple (restricted).
+                        if (isHttpsEnv && !sys.ip.toString().startsWith('https')) {
+                            resolve({ ...sys, status: 'restricted' });
+                            return;
+                        }
+
                         let isResolved = false;
                         const img = new Image();
 
@@ -56,13 +73,36 @@
 
                         img.onload = () => finish('online');
                         img.onerror = () => finish('offline');
-                        setTimeout(() => finish('offline'), 3000);
-                        img.src = `http://${sys.ip}:${sys.port}/favicon.ico?r=${Math.random()}`;
+                        setTimeout(() => finish('offline'), 6000); // 6 sec timeout for slow VPNs
+                        img.src = `http://${sys.ip}:${sys.port}/favicon.ico?r=${Date.now()}`;
                     });
                 }));
 
                 setSystems(checkedSystems);
             };
+
+            // ==========================================
+            // AUTO-MONITORING (EVERY 30 SECONDS)
+            // ==========================================
+            React.useEffect(() => {
+                let intervalId;
+                if (authState === 'authenticated') {
+                    intervalId = setInterval(() => {
+                        // We still fetch from cloud in background to see if anyone added/removed a system!
+                        fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+                            headers: { 'X-Master-Key': API_KEY } 
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            let parsedSystems = data.record?.systems || data.record || [];
+                            checkAllStatuses(parsedSystems, true);
+                        })
+                        .catch(err => console.error("Background sync error:", err));
+                    }, 30000); 
+                }
+                return () => clearInterval(intervalId); 
+            }, [authState]);
+
 
             // ==========================================
             // CLOUD DATABASE FUNCTIONS (JSONBIN)
@@ -77,15 +117,9 @@
                     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
                     
                     const data = await response.json();
+                    let parsedSystems = data.record?.systems || data.record || [];
                     
-                    let parsedSystems = [];
-                    if (data.record && data.record.systems && Array.isArray(data.record.systems)) {
-                        parsedSystems = data.record.systems;
-                    } else if (data.record && Array.isArray(data.record)) {
-                        parsedSystems = data.record;
-                    }
-                    
-                    await checkAllStatuses(parsedSystems);
+                    await checkAllStatuses(parsedSystems, false);
                     
                 } catch (error) {
                     console.error(error);
@@ -95,7 +129,7 @@
             };
 
             const saveToCloud = async (newSystems) => {
-                checkAllStatuses(newSystems);
+                checkAllStatuses(newSystems, false);
                 const payloadToSave = { systems: newSystems };
                 
                 try {
@@ -113,16 +147,28 @@
                 }
             };
 
-            React.useEffect(() => {
-                const handleEsc = (e) => {
-                    if (e.key === 'Escape') { setActiveVideo(null); setEditingSystem(null); }
-                };
-                window.addEventListener('keydown', handleEsc);
-                return () => window.removeEventListener('keydown', handleEsc);
-            }, []);
+            // ==========================================
+            // DOWNLOAD HTML APPLICATON
+            // ==========================================
+            const downloadLocalApp = () => {
+                fetch(window.location.href)
+                    .then(r => r.text())
+                    .then(html => {
+                        const blob = new Blob([html], { type: 'text/html' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'DashAV_Fleet_Manager.html';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    })
+                    .catch(() => alert("Download failed. Please right-click the page and select 'Save As...'."));
+            };
 
             // ==========================================
-            // OBFUSCATED SECURITY LOGIC
+            // LOGIC & CRUD
             // ==========================================
             const handlePasscodeSubmit = (e) => {
                 e.preventDefault();
@@ -139,16 +185,9 @@
                 setColorSelection(newSelection);
                 
                 if (newSelection.length === 3) {
-                    const stringifiedSequence = newSelection.join(',');
-                    if (btoa(stringifiedSequence) === 'cmVkLGdyZWVuLGJsdWU=') {
-                        // Success! Now check if we are on the public internet (HTTPS)
-                        if (window.location.protocol === 'https:') {
-                            setAuthState('browser-setup'); // Show the manual instruction screen
-                        } else {
-                            // If local file, skip instructions and go right in
-                            setAuthState('authenticated');
-                            fetchFromCloud();
-                        }
+                    if (btoa(newSelection.join(',')) === 'cmVkLGdyZWVuLGJsdWU=') {
+                        setAuthState('authenticated');
+                        fetchFromCloud();
                     } else {
                         alert('Security Breach. Access Denied.');
                         setColorSelection([]);
@@ -158,7 +197,6 @@
                 }
             };
 
-            // CRUD OPERATIONS
             const handleAddSystem = () => { setEditingSystem({ id: Date.now(), name: "New System", ip: "127.0.0.1", port: "8000", network: "VPN", status: "checking", videoLink: "" }); };
             const handleSaveSystem = () => {
                 let updatedSystems = !systems.find(s => s.id === editingSystem.id) ? [...systems, editingSystem] : systems.map(s => s.id === editingSystem.id ? editingSystem : s);
@@ -172,16 +210,16 @@
                 }
             };
 
+            // ==========================================
             // UI RENDERS
+            // ==========================================
             if (authState === 'passcode') {
                 return (
                     <div className="min-h-screen flex items-center justify-center text-white">
                         <form onSubmit={handlePasscodeSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-t-4 border-indigo-500 w-full max-w-sm border-gray-700">
                             <i className="fas fa-lock text-5xl text-indigo-500 mb-4"></i>
                             <h2 className="text-3xl font-bold mb-4">Secure Access</h2>
-                            <div className="mb-6">
-                                <p className="text-gray-400 font-medium tracking-wide">Please enter your authorization PIN to securely access the fleet manager.</p>
-                            </div>
+                            <div className="mb-6"><p className="text-gray-400 font-medium tracking-wide">Please enter your authorization PIN to securely access the fleet manager.</p></div>
                             <input type="password" value={passcode} onChange={e => setPasscode(e.target.value)} className="w-full text-center bg-gray-900 border border-gray-600 rounded-lg p-3 text-white tracking-widest text-2xl mb-4 focus:border-indigo-500 focus:outline-none shadow-inner" placeholder="****" autoFocus />
                             <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded font-bold text-lg transition shadow-lg">Verify</button>
                         </form>
@@ -190,18 +228,13 @@
             }
 
             if (authState === 'colors') {
-                const colors = [
-                    { id: 'yellow', hex: '#EAB308' }, { id: 'red', hex: '#EF4444' }, { id: 'purple', hex: '#A855F7' },
-                    { id: 'green', hex: '#22C55E' }, { id: 'blue', hex: '#3B82F6' }, { id: 'orange', hex: '#F97316' }
-                ];
+                const colors = [{ id: 'yellow', hex: '#EAB308' }, { id: 'red', hex: '#EF4444' }, { id: 'purple', hex: '#A855F7' }, { id: 'green', hex: '#22C55E' }, { id: 'blue', hex: '#3B82F6' }, { id: 'orange', hex: '#F97316' }];
                 return (
                     <div className="min-h-screen flex items-center justify-center text-white">
                         <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-t-4 border-indigo-500 w-full max-w-sm border-gray-700">
                             <i className="fas fa-fingerprint text-5xl text-indigo-500 mb-4"></i>
                             <h2 className="text-3xl font-bold mb-4">Sequence Verification</h2>
-                            <div className="mb-6">
-                                <p className="text-gray-400 font-medium mb-3">Please select the correct color sequence to authenticate your session.</p>
-                            </div>
+                            <div className="mb-6"><p className="text-gray-400 font-medium mb-3">Please select the correct color sequence to authenticate your session.</p></div>
                             <div className="grid grid-cols-3 gap-3 mb-6">
                                 {colors.map(c => (
                                     <button key={c.id} onClick={() => handleColorClick(c.id)} style={{ backgroundColor: c.hex }} className="h-16 w-full rounded shadow hover:opacity-80 active:scale-95 border border-black/20"></button>
@@ -212,41 +245,6 @@
                                     <div key={i} className={`h-3 w-12 rounded-full transition-colors duration-300 ${colorSelection.length > i ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]' : 'bg-gray-700'}`}></div>
                                 ))}
                             </div>
-                        </div>
-                    </div>
-                );
-            }
-
-            // NEW BROWSER SETUP SCREEN
-            if (authState === 'browser-setup') {
-                return (
-                    <div className="min-h-screen flex items-center justify-center text-white p-4">
-                        <div className="bg-gray-800 p-8 rounded-xl shadow-2xl border-t-4 border-yellow-500 w-full max-w-lg border-gray-700 animate-fadeIn">
-                            <div className="text-center mb-6">
-                                <i className="fas fa-shield-alt text-5xl text-yellow-500 mb-4"></i>
-                                <h2 className="text-2xl font-bold">One-Time Browser Setup</h2>
-                                <p className="text-gray-300 mt-2">Because this dashboard is hosted securely, your browser will block it from pinging your local Companion IPs. You must allow it manually.</p>
-                            </div>
-                            
-                            <div className="bg-gray-900 p-4 rounded-lg mb-6 border border-gray-700">
-                                <ol className="list-decimal list-inside text-gray-300 space-y-3 font-medium">
-                                    <li>Click the <i className="fas fa-lock text-gray-400 mx-1"></i> <strong>Padlock</strong> or Settings icon next to the URL bar above.</li>
-                                    <li>Click on <strong>Site settings</strong>.</li>
-                                    <li>Scroll down to <strong>Insecure content</strong> or <strong>Mixed Content</strong>.</li>
-                                    <li>Change the dropdown from <span className="text-red-400">Block</span> to <span className="text-green-400">Allow</span>.</li>
-                                    <li>Return to this tab.</li>
-                                </ol>
-                            </div>
-                            
-                            <button 
-                                onClick={() => {
-                                    setAuthState('authenticated');
-                                    fetchFromCloud();
-                                }} 
-                                className="w-full bg-green-600 hover:bg-green-500 py-4 rounded font-bold text-lg transition shadow-lg flex justify-center items-center gap-2"
-                            >
-                                <i className="fas fa-check-circle"></i> I Have Allowed Insecure Content
-                            </button>
                         </div>
                     </div>
                 );
@@ -263,14 +261,34 @@
                             </div>
                         </div>
 
+                        {/* HTTPS RESTRICTION BANNER */}
+                        {isHttpsEnv && (
+                            <div className="bg-purple-900/30 border border-purple-500 rounded-xl p-5 mb-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-lg animate-fadeIn">
+                                <div className="flex items-center gap-4">
+                                    <i className="fas fa-shield-alt text-purple-400 text-4xl"></i>
+                                    <div>
+                                        <h3 className="text-purple-200 font-bold text-lg mb-1">Realtime Connection Feedback Paused</h3>
+                                        <p className="text-purple-300 text-sm leading-relaxed">Web browsers block background IP scanning on secure public websites (GitHub Pages). You can manage the database here, but to use live Online/Offline tracking, you must run this tool locally on your computer.</p>
+                                    </div>
+                                </div>
+                                <button onClick={downloadLocalApp} className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-lg font-bold whitespace-nowrap transition flex items-center gap-2 shadow-lg w-full sm:w-auto justify-center">
+                                    <i className="fas fa-download text-xl"></i> Download Local App
+                                </button>
+                            </div>
+                        )}
+
                         {isLoading && systems.length === 0 ? (
                             <div className="text-center py-20 text-gray-400"><i className="fas fa-cloud text-5xl mb-4 animate-pulse"></i><p>Fetching from Cloud database...</p></div>
                         ) : systems.length === 0 ? (
                             <div className="text-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-xl"><i className="fas fa-server text-4xl mb-3"></i><p>No systems configured in database.</p><p className="text-sm mt-2">Click 'Add Unit' to begin tracking.</p></div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {systems.map((sys) => (
-                                    <div key={sys.id} className="bg-gray-800 rounded-xl p-5 border-t-4 shadow-lg flex flex-col" style={{ borderColor: sys.status === 'online' ? '#10B981' : sys.status === 'offline' ? '#EF4444' : '#F59E0B' }}>
+                                {systems.map((sys) => {
+                                    // Status Colors: Online = Green, Offline = Red, Restricted (GitHub) = Purple, Checking = Yellow
+                                    const bdColor = sys.status === 'online' ? '#10B981' : sys.status === 'offline' ? '#EF4444' : sys.status === 'restricted' ? '#8B5CF6' : '#F59E0B';
+                                    
+                                    return (
+                                    <div key={sys.id} className="bg-gray-800 rounded-xl p-5 border-t-4 shadow-lg flex flex-col" style={{ borderColor: bdColor }}>
                                         <div className="flex justify-between items-start mb-4">
                                             <h2 className="text-xl font-bold truncate pr-3">{sys.name}</h2>
                                             <button onClick={() => setEditingSystem({...sys})} className="text-gray-400 hover:text-white"><i className="fas fa-cog text-lg transition transform hover:rotate-90"></i></button>
@@ -293,7 +311,8 @@
                                         </div>
                                         <button onClick={() => setActiveVideo(sys)} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded font-bold text-sm transition shadow mt-1"><i className="fas fa-video mr-2"></i> Open Monitor</button>
                                     </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         )}
                     </div>

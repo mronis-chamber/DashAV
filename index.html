@@ -3,32 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Companion Fleet Manager</title>
+    <title>DashAV Fleet Manager</title>
+    
+    <!-- React & Tailwind CDNs -->
     <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-    <style>body { background-color: #111827; }</style>
+    <style>
+        body { background-color: #111827; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
+    </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
         // ==========================================
-        // ADD YOUR GITHUB DETAILS HERE
+        // GITHUB REPOSITORY DETAILS
         // ==========================================
-        const GITHUB_USERNAME = 'YOUR_USERNAME_HERE'; 
-        const GITHUB_REPO = 'fleet-tracker';
+        const GITHUB_USERNAME = 'mronis-chamber'; 
+        const GITHUB_REPO = 'DashAV';
         const FILE_PATH = 'data.json';
         // ==========================================
 
         function App() {
-            const [authState, setAuthState] = React.useState('passcode'); 
+            // AUTHENTICATION STATE
+            const [authState, setAuthState] = React.useState('passcode'); // 'passcode', 'colors', 'tokenInput', 'authenticated'
             const [passcode, setPasscode] = React.useState('');
             const [colorSelection, setColorSelection] = React.useState([]);
             const [ghToken, setGhToken] = React.useState(localStorage.getItem('ghToken') || '');
-            
+
+            // SYSTEMS STATE
             const [systems, setSystems] = React.useState([]);
             const [fileSha, setFileSha] = React.useState('');
             const [isLoading, setIsLoading] = React.useState(false);
@@ -40,34 +48,42 @@
                 setIsLoading(true);
                 try {
                     const response = await fetch(`https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${FILE_PATH}`, {
-                        headers: { 'Authorization': `Bearer ${ghToken}`, 'Accept': 'application/vnd.github.v3+json' }
+                        headers: { 
+                            'Authorization': `Bearer ${ghToken}`, 
+                            'Accept': 'application/vnd.github.v3+json' 
+                        },
+                        cache: 'no-store' 
                     });
-                    if (!response.ok) throw new Error('Check Token or Repo Settings');
+                    
+                    if (!response.ok) {
+                        throw new Error(`GitHub API Error: ${response.status} - Check Token, Repo name, or if data.json exists.`);
+                    }
                     
                     const data = await response.json();
-                    setFileSha(data.sha); // We need the SHA to update the file later
+                    setFileSha(data.sha); 
                     
-                    // GitHub returns Base64 encoded content
-                    const decodedContent = atob(data.content);
+                    const decodedContent = decodeURIComponent(escape(atob(data.content)));
                     const parsedSystems = JSON.parse(decodedContent);
                     
                     const loadedSystems = parsedSystems.map(s => ({...s, status: 'checking'}));
                     setSystems(loadedSystems);
                     
                     setTimeout(() => {
-                        setSystems(prev => prev.map(s => ({ ...s, status: 'online' }))); // simplified ping
+                        setSystems(prev => prev.map(s => ({ ...s, status: 'online' }))); 
                     }, 1000);
                 } catch (error) {
-                    alert('Error connecting to GitHub: ' + error.message);
-                    setAuthState('tokenInput'); // Force re-entry of token if it fails
+                    console.error(error);
+                    alert(error.message);
+                    setAuthState('tokenInput'); 
                 }
                 setIsLoading(false);
             };
 
             const saveToGitHub = async (newSystems) => {
-                setSystems(newSystems);
+                setSystems(newSystems.map(s => ({...s, status: 'online'}))); 
                 try {
-                    const encodedContent = btoa(JSON.stringify(newSystems, null, 2));
+                    const jsonString = JSON.stringify(newSystems, null, 2);
+                    const encodedContent = btoa(unescape(encodeURIComponent(jsonString))); 
                     
                     const response = await fetch(`https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${FILE_PATH}`, {
                         method: 'PUT',
@@ -77,18 +93,31 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            message: "Update fleet systems via Dashboard",
+                            message: "Automated update from DashAV Fleet Manager",
                             content: encodedContent,
-                            sha: fileSha // Must provide current SHA to overwrite
+                            sha: fileSha 
                         })
                     });
                     
                     const data = await response.json();
-                    setFileSha(data.content.sha); // Update to new SHA
+                    if (data.content && data.content.sha) {
+                        setFileSha(data.content.sha); 
+                    } else {
+                        throw new Error("Failed to get updated file SHA from GitHub.");
+                    }
                 } catch (error) {
-                    alert("Failed to save to GitHub.");
+                    console.error(error);
+                    alert("Failed to save changes to GitHub.");
                 }
             };
+
+            React.useEffect(() => {
+                const handleEsc = (e) => {
+                    if (e.key === 'Escape') { setActiveVideo(null); setEditingSystem(null); }
+                };
+                window.addEventListener('keydown', handleEsc);
+                return () => window.removeEventListener('keydown', handleEsc);
+            }, []);
 
             // AUTHENTICATION LOGIC
             const handlePasscodeSubmit = (e) => {
@@ -111,99 +140,262 @@
                         }
                     } else {
                         alert('Security Breach. Access Denied.');
-                        setColorSelection([]); setAuthState('passcode'); setPasscode('');
+                        setColorSelection([]);
+                        setAuthState('passcode');
+                        setPasscode('');
                     }
                 }
             };
 
             const handleTokenSubmit = (e) => {
                 e.preventDefault();
-                localStorage.setItem('ghToken', ghToken);
-                setAuthState('authenticated');
-                fetchFromGitHub();
+                if(ghToken.trim().length > 10) {
+                    localStorage.setItem('ghToken', ghToken.trim());
+                    setAuthState('authenticated');
+                    fetchFromGitHub();
+                } else {
+                    alert("Please enter a valid GitHub token.");
+                }
             };
 
             // CRUD OPERATIONS
-            const handleAddSystem = () => setEditingSystem({ id: Date.now(), name: "New System", ip: "127.0.0.1", port: "8000", network: "VPN", status: "checking", videoLink: "" });
-            
+            const handleAddSystem = () => {
+                const newSys = { id: Date.now(), name: "New System", ip: "127.0.0.1", port: "8000", network: "VPN", status: "checking", videoLink: "" };
+                setEditingSystem(newSys);
+            };
+
             const handleSaveSystem = () => {
-                const updatedSystems = systems.find(s => s.id === editingSystem.id) 
-                    ? systems.map(s => s.id === editingSystem.id ? editingSystem : s)
-                    : [...systems, editingSystem];
+                let updatedSystems;
+                if (!systems.find(s => s.id === editingSystem.id)) {
+                    updatedSystems = [...systems, editingSystem];
+                } else {
+                    updatedSystems = systems.map(s => s.id === editingSystem.id ? editingSystem : s);
+                }
                 setEditingSystem(null);
                 saveToGitHub(updatedSystems);
             };
 
             const handleDeleteSystem = (id) => {
-                if (window.confirm("Delete this system directly from GitHub?")) {
-                    saveToGitHub(systems.filter(s => s.id !== id));
+                if (window.confirm("Are you sure you want to permanently delete this system from GitHub?")) {
+                    const updatedSystems = systems.filter(s => s.id !== id);
+                    saveToGitHub(updatedSystems);
                     setEditingSystem(null);
                 }
             };
 
-            // RENDER LOGIC
-            if (authState === 'passcode') return (<div className="min-h-screen flex items-center justify-center"><form onSubmit={handlePasscodeSubmit} className="bg-gray-800 p-8 rounded-xl"><input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="text-center rounded p-2" autoFocus/></form></div>);
-            
-            if (authState === 'colors') return (<div className="min-h-screen flex items-center justify-center"><div className="bg-gray-800 p-8 rounded-xl grid grid-cols-3 gap-2">{[{id:'yellow',hex:'#EAB308'},{id:'red',hex:'#EF4444'},{id:'purple',hex:'#A855F7'},{id:'green',hex:'#22C55E'},{id:'blue',hex:'#3B82F6'},{id:'orange',hex:'#F97316'}].map(c => <button key={c.id} onClick={() => handleColorClick(c.id)} style={{backgroundColor: c.hex}} className="h-16 w-16 rounded"></button>)}</div></div>);
+            // ==========================================
+            // RENDER: SECURITY STEP 1 (PASSCODE)
+            // ==========================================
+            if (authState === 'passcode') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white">
+                        <form onSubmit={handlePasscodeSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border border-gray-700 w-full max-w-sm">
+                            <i className="fas fa-lock text-5xl text-indigo-500 mb-4"></i>
+                            <h2 className="text-2xl font-bold mb-2">Step 1: Passcode</h2>
+                            <p className="text-gray-400 text-sm mb-6">
+                                Welcome to the DashAV Fleet Tracker. <br/>
+                                Please enter the required passcode: <br/>
+                                <strong className="text-white text-lg tracking-widest mt-2 block">1 6 1 5</strong>
+                            </p>
+                            <input 
+                                type="password" 
+                                value={passcode} 
+                                onChange={e => setPasscode(e.target.value)} 
+                                className="w-full text-center bg-gray-900 border border-gray-600 rounded p-3 text-white tracking-widest text-xl mb-4 focus:outline-none focus:border-indigo-500" 
+                                placeholder="****" 
+                                autoFocus 
+                            />
+                            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded font-bold transition shadow-lg">Verify Passcode</button>
+                        </form>
+                    </div>
+                );
+            }
 
-            if (authState === 'tokenInput') return (
-                <div className="min-h-screen flex items-center justify-center text-white">
-                    <form onSubmit={handleTokenSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-md text-center">
-                        <h2 className="text-xl font-bold mb-4">First-Time Setup</h2>
-                        <p className="text-sm text-gray-400 mb-4">Enter your GitHub Fine-Grained Token. This stays locally on this device.</p>
-                        <input type="password" value={ghToken} onChange={e => setGhToken(e.target.value)} className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white mb-4" placeholder="github_pat_..." required />
-                        <button type="submit" className="w-full bg-indigo-600 py-2 rounded font-bold">Connect to GitHub</button>
-                    </form>
-                </div>
-            );
+            // ==========================================
+            // RENDER: SECURITY STEP 2 (COLORS)
+            // ==========================================
+            if (authState === 'colors') {
+                const colors = [
+                    { id: 'yellow', hex: '#EAB308' }, { id: 'red', hex: '#EF4444' }, { id: 'purple', hex: '#A855F7' },
+                    { id: 'green', hex: '#22C55E' }, { id: 'blue', hex: '#3B82F6' }, { id: 'orange', hex: '#F97316' }
+                ];
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white">
+                        <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border border-gray-700 w-full max-w-sm">
+                            <i className="fas fa-fingerprint text-5xl text-indigo-500 mb-4"></i>
+                            <h2 className="text-2xl font-bold mb-2">Step 2: Color Security</h2>
+                            <p className="text-gray-400 text-sm mb-6">
+                                To complete verification, please click the 3 right colors in exact order: <br/>
+                                <span className="text-red-400 font-bold">1st: RED</span> • 
+                                <span className="text-green-400 font-bold"> 2nd: GREEN</span> • 
+                                <span className="text-blue-400 font-bold"> 3rd: BLUE</span>
+                            </p>
+                            
+                            <div className="grid grid-cols-3 gap-4 mb-6">
+                                {colors.map(color => (
+                                    <button key={color.id} onClick={() => handleColorClick(color.id)} style={{ backgroundColor: color.hex }} className="h-16 w-full rounded shadow-md hover:opacity-80 transition transform hover:scale-105 active:scale-95 border-2 border-transparent"></button>
+                                ))}
+                            </div>
+                            <div className="flex gap-2 justify-center mt-4 bg-gray-900 p-2 rounded">
+                                {[0, 1, 2].map(i => (
+                                    <div key={i} className={`h-3 w-12 rounded-full transition-colors duration-300 ${colorSelection.length > i ? 'bg-indigo-500 shadow-glow' : 'bg-gray-700'}`}></div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
 
-            // MAIN DASHBOARD
+            // ==========================================
+            // RENDER: SECURITY STEP 3 (GITHUB TOKEN)
+            // ==========================================
+            if (authState === 'tokenInput') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white">
+                        <form onSubmit={handleTokenSubmit} className="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-md text-center border border-gray-700">
+                            <i className="fab fa-github text-5xl text-white mb-4"></i>
+                            <h2 className="text-2xl font-bold mb-2">Initialize Connection</h2>
+                            <p className="text-sm text-gray-400 mb-6 bg-gray-900 p-4 rounded text-left">
+                                You have passed security, but this device does not have read/write access to the DashAV database yet.<br/><br/>
+                                Please paste your <strong>GitHub Fine-Grained Personal Access Token</strong> below to connect.
+                            </p>
+                            <input type="password" value={ghToken} onChange={e => setGhToken(e.target.value)} className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-white mb-4 font-mono text-sm focus:outline-none focus:border-indigo-500" placeholder="github_pat_..." required autoFocus />
+                            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 py-3 rounded font-bold transition shadow-lg">Save Token & Connect</button>
+                        </form>
+                    </div>
+                );
+            }
+
+            // ==========================================
+            // RENDER: SECURE DASHBOARD
+            // ==========================================
             return (
                 <div className="min-h-screen text-white p-8 font-sans">
-                    <div className="max-w-7xl mx-auto">
-                        <div className="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
-                            <h1 className="text-3xl font-bold"><i className="fas fa-satellite-dish text-indigo-500"></i> Fleet Manager</h1>
+                    <div className="max-w-7xl mx-auto relative">
+                        {/* Header Area */}
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 border-b border-gray-700 pb-4 gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold flex items-center gap-3">
+                                    <i className="fas fa-broadcast-tower text-indigo-500"></i> DashAV Fleet Manager
+                                </h1>
+                            </div>
                             <div className="flex gap-3">
-                                <button onClick={handleAddSystem} className="bg-green-600 px-4 py-2 rounded text-white font-bold"><i className="fas fa-plus"></i></button>
-                                <button onClick={fetchFromGitHub} className="bg-indigo-600 px-4 py-2 rounded text-white font-bold"><i className={`fas fa-sync ${isLoading ? 'fa-spin' : ''}`}></i></button>
+                                <button onClick={handleAddSystem} disabled={isLoading} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-5 py-2.5 rounded shadow flex items-center gap-2 transition font-semibold">
+                                    <i className="fas fa-plus"></i> Add Unit
+                                </button>
+                                <button onClick={fetchFromGitHub} disabled={isLoading} className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 py-2.5 rounded shadow flex items-center gap-2 transition font-semibold">
+                                    <i className={`fas fa-sync-alt ${isLoading ? 'fa-spin' : ''}`}></i> {isLoading ? 'Syncing...' : 'Sync GitHub'}
+                                </button>
                             </div>
                         </div>
 
-                        {isLoading && systems.length === 0 ? <p className="text-center text-gray-400 mt-20">Loading from GitHub Repository...</p> : (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                {systems.map(sys => (
-                                    <div key={sys.id} className="bg-gray-800 p-5 rounded-xl border-t-4 shadow flex flex-col" style={{ borderColor: sys.status === 'online' ? '#10B981' : '#EF4444' }}>
-                                        <div className="flex justify-between mb-4">
-                                            <h2 className="text-xl font-bold">{sys.name}</h2>
-                                            <button onClick={() => setEditingSystem({...sys})}><i className="fas fa-cog text-gray-400"></i></button>
+                        {/* Systems Grid */}
+                        {isLoading && systems.length === 0 ? (
+                            <div className="text-center py-20 text-gray-400">
+                                <i className="fab fa-github text-5xl mb-4 animate-pulse text-gray-600"></i>
+                                <p className="text-lg">Fetching fleet data from DashAV repository...</p>
+                            </div>
+                        ) : systems.length === 0 ? (
+                            <div className="text-center py-20 text-gray-500 border-2 border-dashed border-gray-700 rounded-xl">
+                                <i className="fas fa-server text-4xl mb-3"></i>
+                                <p>No systems found in data.json.</p>
+                                <p className="text-sm mt-2">Click "Add Unit" to create your first configuration.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {systems.map((sys) => (
+                                    <div key={sys.id} className="bg-gray-800 rounded-xl p-5 border-t-4 shadow-lg flex flex-col h-full animate-fadeIn" style={{ borderColor: sys.status === 'online' ? '#10B981' : sys.status === 'offline' ? '#EF4444' : '#F59E0B' }}>
+                                        
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex-1 min-w-0 pr-3">
+                                                <h2 className="text-xl font-bold truncate">{sys.name}</h2>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={() => setEditingSystem({...sys})} className="text-gray-400 hover:text-white transition">
+                                                    <i className="fas fa-cog text-lg"></i>
+                                                </button>
+                                                <div className="flex items-center gap-2 text-sm font-medium bg-gray-900 px-2.5 py-1 rounded-full border border-gray-700">
+                                                    {sys.status === 'checking' && <span className="text-yellow-500"><i className="fas fa-spinner fa-spin"></i> Ping</span>}
+                                                    {sys.status === 'online' && <span className="text-green-500"><i className="fas fa-circle text-[10px]"></i> Ready</span>}
+                                                    {sys.status === 'offline' && <span className="text-red-500"><i className="fas fa-times-circle"></i> Down</span>}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="font-mono text-sm text-gray-300 mb-4">{sys.ip}:{sys.port}</div>
-                                        <div className="grid grid-cols-2 gap-2 mt-auto">
-                                            <a href={`http://${sys.ip}:${sys.port}`} target="_blank" className="bg-gray-700 text-center py-2 rounded font-bold">GUI</a>
-                                            <button onClick={() => setActiveVideo(sys)} className="bg-purple-600 py-2 rounded font-bold">Monitor</button>
+
+                                        <div className="space-y-4 mb-6 flex-grow text-gray-300 text-sm">
+                                            <div className="flex bg-gray-900/50 rounded-lg p-3 gap-4 border border-gray-700/50">
+                                                <div className="flex-1 overflow-hidden">
+                                                    <div className="text-xs text-gray-500 uppercase font-semibold mb-1"><i className="fas fa-network-wired w-4 text-center"></i> Routing</div>
+                                                    <div className="font-medium text-blue-300 truncate">{sys.network || 'N/A'}</div>
+                                                </div>
+                                                <div className="border-l border-gray-700/50 pl-4 flex-1">
+                                                    <div className="text-xs text-gray-500 uppercase font-semibold mb-1"><i className="fas fa-server w-4 text-center"></i> Endpoint</div>
+                                                    <div className="font-mono text-[13px]">{sys.ip}:{sys.port}</div>
+                                                </div>
+                                            </div>
                                         </div>
+
+                                        <div className="grid grid-cols-2 gap-2 mt-auto mb-2">
+                                            <a href={`http://${sys.ip}:${sys.port}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 py-2 px-3 rounded text-sm font-semibold transition bg-gray-700 hover:bg-gray-600 text-white">
+                                                <i className="fas fa-sliders-h"></i> Web GUI
+                                            </a>
+                                            <a href={`http://${sys.ip}:${sys.port}/emulator`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 py-2 px-3 rounded text-sm font-semibold transition bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-600/30">
+                                                <i className="fas fa-mobile-alt"></i> Emulator
+                                            </a>
+                                        </div>
+                                        <button onClick={() => setActiveVideo(sys)} className="w-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center gap-2 py-2.5 px-3 rounded text-sm font-bold transition shadow mt-1">
+                                            <i className="fas fa-video"></i> Open Monitor
+                                        </button>
                                     </div>
                                 ))}
                             </div>
                         )}
                     </div>
 
-                    {/* Editor Modal */}
-                     {editingSystem && (
-                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-                            <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md border border-gray-600 p-5 text-white">
-                                <h3 className="font-bold text-lg mb-4">System Info (Updates GitHub Directly)</h3>
+                    {/* Edit/Add Modal */}
+                    {editingSystem && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fadeIn">
+                            <div className="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md border border-gray-600 p-6 relative">
+                                <h3 className="font-bold text-xl text-white mb-5 border-b border-gray-700 pb-3">
+                                    <i className="fab fa-github text-gray-400 mr-2"></i>
+                                    {systems.find(s => s.id === editingSystem.id) ? 'Edit Config' : 'Add System'}
+                                </h3>
+                                
                                 <div className="space-y-4">
-                                    <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 placeholder-gray-500" placeholder="Name" value={editingSystem.name} onChange={e => setEditingSystem({...editingSystem, name: e.target.value})} />
-                                    <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 placeholder-gray-500" placeholder="IP Address" value={editingSystem.ip} onChange={e => setEditingSystem({...editingSystem, ip: e.target.value})} />
-                                    <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 placeholder-gray-500" placeholder="Port" value={editingSystem.port} onChange={e => setEditingSystem({...editingSystem, port: e.target.value})} />
-                                    <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2 placeholder-gray-500" placeholder="VDO.ninja Link" value={editingSystem.videoLink} onChange={e => setEditingSystem({...editingSystem, videoLink: e.target.value})} />
+                                    <div>
+                                        <label className="block text-xs text-gray-400 font-bold mb-1">System Name</label>
+                                        <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-indigo-500" value={editingSystem.name} onChange={e => setEditingSystem({...editingSystem, name: e.target.value})} autoFocus />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 font-bold mb-1">Network Route (Label)</label>
+                                        <input type="text" placeholder="e.g. Tailscale, OpenVPN, Local LAN" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white focus:outline-none focus:border-indigo-500" value={editingSystem.network || ''} onChange={e => setEditingSystem({...editingSystem, network: e.target.value})} />
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="block text-xs text-gray-400 font-bold mb-1">IP Address</label>
+                                            <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.ip} onChange={e => setEditingSystem({...editingSystem, ip: e.target.value})} />
+                                        </div>
+                                        <div className="w-24">
+                                            <label className="block text-xs text-gray-400 font-bold mb-1">Port</label>
+                                            <input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.port} onChange={e => setEditingSystem({...editingSystem, port: e.target.value})} />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-400 font-bold mb-1">Video Feed URL (Embeddable)</label>
+                                        <input type="text" placeholder="https://vdo.ninja/..." className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.videoLink} onChange={e => setEditingSystem({...editingSystem, videoLink: e.target.value})} />
+                                    </div>
                                 </div>
-                                <div className="mt-6 flex justify-between">
-                                    <button onClick={() => handleDeleteSystem(editingSystem.id)} className="text-red-500 font-bold"><i className="fas fa-trash"></i></button>
+                                <div className="mt-8 flex justify-between items-center">
+                                    {systems.find(s => s.id === editingSystem.id) ? (
+                                        <button onClick={() => handleDeleteSystem(editingSystem.id)} className="text-red-500 hover:text-red-400 font-semibold flex items-center gap-1 transition px-2 py-1 rounded hover:bg-red-500/10">
+                                            <i className="fas fa-trash-alt"></i> Delete
+                                        </button>
+                                    ) : <div></div>}
                                     <div className="flex gap-3">
-                                        <button onClick={() => setEditingSystem(null)} className="text-gray-400">Cancel</button>
-                                        <button onClick={handleSaveSystem} className="bg-indigo-600 px-4 py-2 rounded font-bold">Save Commit</button>
+                                        <button onClick={() => setEditingSystem(null)} className="text-gray-400 hover:text-white font-semibold px-3 py-2 transition">Cancel</button>
+                                        <button onClick={handleSaveSystem} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 transition text-white rounded shadow font-bold flex items-center gap-2">
+                                            Save to GitHub <i className="fas fa-cloud-upload-alt"></i>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -212,10 +404,22 @@
 
                     {/* Video Modal */}
                     {activeVideo && (
-                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-50">
+                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-50 animate-fadeIn">
                             <div className="w-full h-full relative">
-                                <button onClick={() => setActiveVideo(null)} className="absolute top-4 right-4 bg-gray-800 text-white rounded-full h-10 w-10 z-50 flex items-center justify-center hover:bg-red-600"><i className="fas fa-times"></i></button>
-                                <iframe src={activeVideo.videoLink} className="w-full h-full border-0" allow="autoplay; camera; microphone; fullscreen"></iframe>
+                                <div className="absolute top-0 left-0 w-full p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center z-50 pointer-events-none">
+                                    <h2 className="text-white font-bold text-xl drop-shadow-md">{activeVideo.name} Monitor</h2>
+                                    <button onClick={() => setActiveVideo(null)} className="pointer-events-auto bg-gray-800 text-white rounded-full h-12 w-12 flex items-center justify-center hover:bg-red-600 transition shadow-lg border border-gray-600 hover:border-red-500">
+                                        <i className="fas fa-times text-xl"></i>
+                                    </button>
+                                </div>
+                                {activeVideo.videoLink ? (
+                                    <iframe src={activeVideo.videoLink} className="w-full h-full border-0" allow="autoplay; camera; microphone; fullscreen"></iframe>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                        <i className="fas fa-video-slash text-6xl mb-4"></i>
+                                        <p className="text-xl">No video stream URL configured for this unit.</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

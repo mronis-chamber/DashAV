@@ -37,31 +37,28 @@
             const [editingSystem, setEditingSystem] = React.useState(null);
 
             // ==========================================
-            // REAL NETWORK STATUS CHECKER
+            // TRUE APP STATUS CHECKER (IMAGE PING)
             // ==========================================
             const checkAllStatuses = async (systemList) => {
-                // First, visually set them all to "checking" (yellow)
                 setSystems(systemList.map(s => ({...s, status: 'checking'})));
 
-                // Loop through every system and try to ping its favicon
-                const checkedSystems = await Promise.all(systemList.map(async (sys) => {
-                    try {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-                        
-                        // We use mode 'no-cors' so the browser doesn't freak out. 
-                        // If this succeeds, the system is online. If it throws an error or times out, it's offline.
-                        await fetch(`http://${sys.ip}:${sys.port}/favicon.ico?rand=${Math.random()}`, {
-                            mode: 'no-cors',
-                            cache: 'no-store',
-                            signal: controller.signal
-                        });
-                        
-                        clearTimeout(timeoutId);
-                        return { ...sys, status: 'online' }; // Green
-                    } catch (error) {
-                        return { ...sys, status: 'offline' }; // Red
-                    }
+                const checkedSystems = await Promise.all(systemList.map(sys => {
+                    return new Promise((resolve) => {
+                        let isResolved = false;
+                        const img = new Image();
+
+                        const finish = (status) => {
+                            if (!isResolved) {
+                                isResolved = true;
+                                resolve({ ...sys, status: status });
+                            }
+                        };
+
+                        img.onload = () => finish('online');
+                        img.onerror = () => finish('offline');
+                        setTimeout(() => finish('offline'), 3000);
+                        img.src = `http://${sys.ip}:${sys.port}/favicon.ico?r=${Math.random()}`;
+                    });
                 }));
 
                 setSystems(checkedSystems);
@@ -88,7 +85,6 @@
                         parsedSystems = data.record;
                     }
                     
-                    // Trigger the real status check instead of hardcoding 'online'
                     await checkAllStatuses(parsedSystems);
                     
                 } catch (error) {
@@ -99,9 +95,7 @@
             };
 
             const saveToCloud = async (newSystems) => {
-                // Update UI immediately and test statuses
                 checkAllStatuses(newSystems);
-                
                 const payloadToSave = { systems: newSystems };
                 
                 try {
@@ -147,8 +141,14 @@
                 if (newSelection.length === 3) {
                     const stringifiedSequence = newSelection.join(',');
                     if (btoa(stringifiedSequence) === 'cmVkLGdyZWVuLGJsdWU=') {
-                        setAuthState('authenticated');
-                        fetchFromCloud();
+                        // Success! Now check if we are on the public internet (HTTPS)
+                        if (window.location.protocol === 'https:') {
+                            setAuthState('browser-setup'); // Show the manual instruction screen
+                        } else {
+                            // If local file, skip instructions and go right in
+                            setAuthState('authenticated');
+                            fetchFromCloud();
+                        }
                     } else {
                         alert('Security Breach. Access Denied.');
                         setColorSelection([]);
@@ -212,6 +212,41 @@
                                     <div key={i} className={`h-3 w-12 rounded-full transition-colors duration-300 ${colorSelection.length > i ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]' : 'bg-gray-700'}`}></div>
                                 ))}
                             </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // NEW BROWSER SETUP SCREEN
+            if (authState === 'browser-setup') {
+                return (
+                    <div className="min-h-screen flex items-center justify-center text-white p-4">
+                        <div className="bg-gray-800 p-8 rounded-xl shadow-2xl border-t-4 border-yellow-500 w-full max-w-lg border-gray-700 animate-fadeIn">
+                            <div className="text-center mb-6">
+                                <i className="fas fa-shield-alt text-5xl text-yellow-500 mb-4"></i>
+                                <h2 className="text-2xl font-bold">One-Time Browser Setup</h2>
+                                <p className="text-gray-300 mt-2">Because this dashboard is hosted securely, your browser will block it from pinging your local Companion IPs. You must allow it manually.</p>
+                            </div>
+                            
+                            <div className="bg-gray-900 p-4 rounded-lg mb-6 border border-gray-700">
+                                <ol className="list-decimal list-inside text-gray-300 space-y-3 font-medium">
+                                    <li>Click the <i className="fas fa-lock text-gray-400 mx-1"></i> <strong>Padlock</strong> or Settings icon next to the URL bar above.</li>
+                                    <li>Click on <strong>Site settings</strong>.</li>
+                                    <li>Scroll down to <strong>Insecure content</strong> or <strong>Mixed Content</strong>.</li>
+                                    <li>Change the dropdown from <span className="text-red-400">Block</span> to <span className="text-green-400">Allow</span>.</li>
+                                    <li>Return to this tab.</li>
+                                </ol>
+                            </div>
+                            
+                            <button 
+                                onClick={() => {
+                                    setAuthState('authenticated');
+                                    fetchFromCloud();
+                                }} 
+                                className="w-full bg-green-600 hover:bg-green-500 py-4 rounded font-bold text-lg transition shadow-lg flex justify-center items-center gap-2"
+                            >
+                                <i className="fas fa-check-circle"></i> I Have Allowed Insecure Content
+                            </button>
                         </div>
                     </div>
                 );

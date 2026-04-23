@@ -46,25 +46,21 @@
             }, [systems]);
 
             // ====
-            // REAL NETWORK STATUS CHECKER (From your working version + background flag)
+            // REAL NETWORK STATUS CHECKER
             // ====
             const checkAllStatuses = async (systemList, isBackground = false) => {
-                // If it's a manual refresh, show the yellow "checking" status
                 if (!isBackground) {
                     setSystems(systemList.map(s => ({...s, status: 'checking'})));
                 }
 
-                // Loop through every system and try to ping its favicon
                 const checkedSystems = await Promise.all(systemList.map(async (sys) => {
-                    // 1. If on GitHub Pages (HTTPS) and target is HTTP, mark as purple/restricted
                     if (isHttpsEnv && !sys.ip.toString().startsWith('https')) {
                         return { ...sys, status: 'restricted' };
                     }
                     
-                    // 2. Fetch Ping (Your working logic)
                     try {
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+                        const timeoutId = setTimeout(() => controller.abort(), 3000); 
                         
                         await fetch(`http://${sys.ip}:${sys.port}/favicon.ico?rand=${Math.random()}`, {
                             mode: 'no-cors',
@@ -73,9 +69,9 @@
                         });
                         
                         clearTimeout(timeoutId);
-                        return { ...sys, status: 'online' }; // Green
+                        return { ...sys, status: 'online' };
                     } catch (error) {
-                        return { ...sys, status: 'offline' }; // Red
+                        return { ...sys, status: 'offline' };
                     }
                 }));
 
@@ -89,11 +85,10 @@
                 let intervalId;
                 if (authState === 'authenticated') {
                     intervalId = setInterval(() => {
-                        // Triggers the ping scan in the background (isBackground = true)
                         if (systemsRef.current.length > 0) {
                             checkAllStatuses(systemsRef.current, true);
                         }
-                    }, 30000); // 30,000 ms = 30 seconds
+                    }, 30000); 
                 }
                 return () => clearInterval(intervalId); 
             }, [authState]);
@@ -130,9 +125,7 @@
             };
 
             const saveToCloud = async (newSystems) => {
-                // Update UI immediately and test statuses manually
                 checkAllStatuses(newSystems, false);
-                
                 const payloadToSave = { systems: newSystems };
                 
                 try {
@@ -206,7 +199,18 @@
             };
 
             // CRUD OPERATIONS
-            const handleAddSystem = () => { setEditingSystem({ id: Date.now(), name: "New System", ip: "127.0.0.1", port: "8000", network: "VPN", status: "checking", videoLink: "" }); };
+            const handleAddSystem = () => { 
+                setEditingSystem({ 
+                    id: Date.now(), 
+                    name: "New System", 
+                    ip: "127.0.0.1", 
+                    port: "8000", 
+                    network: "VPN", 
+                    status: "checking", 
+                    videoLink: "",
+                    emulatorId: "" // Added default empty emulator ID
+                }); 
+            };
             const handleSaveSystem = () => {
                 let updatedSystems = !systems.find(s => s.id === editingSystem.id) ? [...systems, editingSystem] : systems.map(s => s.id === editingSystem.id ? editingSystem : s);
                 setEditingSystem(null);
@@ -295,6 +299,12 @@
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {systems.map((sys) => {
                                     const bdColor = sys.status === 'online' ? '#10B981' : sys.status === 'offline' ? '#EF4444' : sys.status === 'restricted' ? '#8B5CF6' : '#F59E0B';
+                                    
+                                    // Build Dynamic Emulator Link
+                                    const emuLink = sys.emulatorId && sys.emulatorId.trim() !== '' 
+                                        ? `http://${sys.ip}:${sys.port}/emulator/${sys.emulatorId.trim()}` 
+                                        : `http://${sys.ip}:${sys.port}/emulator`;
+
                                     return (
                                         <div key={sys.id} className="bg-gray-800 rounded-xl p-5 border-t-4 shadow-lg flex flex-col transition-colors duration-300" style={{ borderColor: bdColor }}>
                                             <div className="flex justify-between items-start mb-4">
@@ -315,7 +325,7 @@
                                             </div>
                                             <div className="grid grid-cols-2 gap-2 mb-2">
                                                 <a href={`http://${sys.ip}:${sys.port}`} target="_blank" className="flex items-center justify-center gap-2 py-2 px-3 rounded text-sm bg-gray-700 hover:bg-gray-600 transition text-white font-bold"><i className="fas fa-sliders-h"></i> Web GUI</a>
-                                                <a href={`http://${sys.ip}:${sys.port}/emulator`} target="_blank" className="flex items-center justify-center gap-2 py-2 px-3 rounded text-sm bg-blue-600/20 hover:bg-blue-600/30 transition text-blue-300 border border-blue-600/30 font-bold"><i className="fas fa-mobile-alt"></i> Emulator</a>
+                                                <a href={emuLink} target="_blank" className="flex items-center justify-center gap-2 py-2 px-3 rounded text-sm bg-blue-600/20 hover:bg-blue-600/30 transition text-blue-300 border border-blue-600/30 font-bold"><i className="fas fa-mobile-alt"></i> Emulator</a>
                                             </div>
                                             <button onClick={() => setActiveVideo(sys)} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2.5 rounded font-bold text-sm transition shadow mt-1"><i className="fas fa-video mr-2"></i> Open Monitor</button>
                                         </div>
@@ -337,6 +347,9 @@
                                         <div className="flex-1"><label className="block text-xs text-gray-400 font-bold mb-1">IP Address</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.ip} onChange={e => setEditingSystem({...editingSystem, ip: e.target.value})} /></div>
                                         <div className="w-24"><label className="block text-xs text-gray-400 font-bold mb-1">Port</label><input type="text" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.port} onChange={e => setEditingSystem({...editingSystem, port: e.target.value})} /></div>
                                     </div>
+                                    {/* New Emulator ID Field */}
+                                    <div><label className="block text-xs text-gray-400 font-bold mb-1">Emulator ID (Optional)</label><input type="text" placeholder="e.g. 2LWsDRyd-h_krxL4NAtqI" className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.emulatorId || ''} onChange={e => setEditingSystem({...editingSystem, emulatorId: e.target.value})} /></div>
+                                    
                                     <div><label className="block text-xs text-gray-400 font-bold mb-1">Video Feed URL (Embeddable)</label><input type="text" placeholder="https://vdo.ninja/..." className="w-full bg-gray-900 border border-gray-600 rounded p-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500" value={editingSystem.videoLink} onChange={e => setEditingSystem({...editingSystem, videoLink: e.target.value})} /></div>
                                 </div>
                                 <div className="mt-8 flex justify-between items-center">
